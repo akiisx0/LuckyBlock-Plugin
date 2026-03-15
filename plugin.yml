@@ -1,0 +1,165 @@
+package com.akiisx.luckyblock.logging;
+
+import com.akiisx.luckyblock.LuckyBlock;
+import org.bukkit.configuration.file.YamlConfiguration;
+
+import java.io.File;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+public class DataLogger {
+    private final LuckyBlock plugin;
+    private final File dataFile;
+    private final ExecutorService executor;
+    private YamlConfiguration data;
+    
+    public DataLogger(LuckyBlock plugin) {
+        this.plugin = plugin;
+        this.dataFile = new File(plugin.getDataFolder(), "data.yml");
+        this.executor = Executors.newSingleThreadExecutor();
+        
+        if (!dataFile.exists()) {
+            try {
+                dataFile.createNewFile();
+            } catch (IOException e) {
+                plugin.getLogger().severe("Could not create data.yml: " + e.getMessage());
+            }
+        }
+        
+        this.data = YamlConfiguration.loadConfiguration(dataFile);
+        initializeStructure();
+    }
+    
+    private void initializeStructure() {
+        executor.submit(() -> {
+            try {
+                if (!data.contains("Statistics")) {
+                    data.set("Statistics.TotalOpened", 0);
+                    data.set("Statistics.TotalMined", 0);
+                    data.set("Statistics.TotalGivenByAdmin", 0);
+                }
+                if (!data.contains("Logs.Openings")) {
+                    data.createSection("Logs.Openings");
+                }
+                if (!data.contains("Logs.Mining")) {
+                    data.createSection("Logs.Mining");
+                }
+                if (!data.contains("Logs.AdminGive")) {
+                    data.createSection("Logs.AdminGive");
+                }
+                data.save(dataFile);
+            } catch (IOException e) {
+                plugin.getLogger().severe("Could not save to data.yml: " + e.getMessage());
+            }
+        });
+    }
+    
+    public void logOpening(String playerName, String luckyBlockType, String rewardId, String rewardName) {
+        executor.submit(() -> {
+            try {
+                int nextId = data.getConfigurationSection("Logs.Openings") != null 
+                    ? data.getConfigurationSection("Logs.Openings").getKeys(false).size() + 1 
+                    : 1;
+                
+                String path = "Logs.Openings." + nextId;
+                data.set(path + ".Player", playerName);
+                data.set(path + ".LuckyBlockType", luckyBlockType);
+                data.set(path + ".RewardID", rewardId);
+                data.set(path + ".RewardName", rewardName);
+                data.set(path + ".Timestamp", getCurrentTimestamp());
+                data.set(path + ".Type", "OPENING");
+                
+                int totalOpened = data.getInt("Statistics.TotalOpened", 0);
+                data.set("Statistics.TotalOpened", totalOpened + 1);
+                
+                data.save(dataFile);
+                
+                plugin.getLogger().info(plugin.getMessagesManager().getLogMessage("block-opened",
+                    "%player%", playerName,
+                    "%type%", luckyBlockType,
+                    "%reward%", rewardName));
+            } catch (IOException e) {
+                plugin.getLogger().severe("Could not save to data.yml: " + e.getMessage());
+            }
+        });
+    }
+    
+    public void logMining(String playerName, String blockType, String luckyBlockType) {
+        executor.submit(() -> {
+            try {
+                int nextId = data.getConfigurationSection("Logs.Mining") != null 
+                    ? data.getConfigurationSection("Logs.Mining").getKeys(false).size() + 1 
+                    : 1;
+                
+                String path = "Logs.Mining." + nextId;
+                data.set(path + ".Player", playerName);
+                data.set(path + ".MinedBlock", blockType);
+                data.set(path + ".LuckyBlockType", luckyBlockType);
+                data.set(path + ".Timestamp", getCurrentTimestamp());
+                data.set(path + ".Type", "MINING");
+                
+                int totalMined = data.getInt("Statistics.TotalMined", 0);
+                data.set("Statistics.TotalMined", totalMined + 1);
+                
+                data.save(dataFile);
+                
+                plugin.getLogger().info(plugin.getMessagesManager().getLogMessage("mining-drop",
+                    "%player%", playerName,
+                    "%block%", blockType));
+            } catch (IOException e) {
+                plugin.getLogger().severe("Could not save to data.yml: " + e.getMessage());
+            }
+        });
+    }
+    
+    public void logAdminGive(String adminName, String playerName, String luckyBlockType, int amount) {
+        executor.submit(() -> {
+            try {
+                int nextId = data.getConfigurationSection("Logs.AdminGive") != null 
+                    ? data.getConfigurationSection("Logs.AdminGive").getKeys(false).size() + 1 
+                    : 1;
+                
+                String path = "Logs.AdminGive." + nextId;
+                data.set(path + ".Admin", adminName);
+                data.set(path + ".Player", playerName);
+                data.set(path + ".LuckyBlockType", luckyBlockType);
+                data.set(path + ".Amount", amount);
+                data.set(path + ".Timestamp", getCurrentTimestamp());
+                data.set(path + ".Type", "ADMIN_GIVE");
+                
+                int totalGiven = data.getInt("Statistics.TotalGivenByAdmin", 0);
+                data.set("Statistics.TotalGivenByAdmin", totalGiven + amount);
+                
+                data.save(dataFile);
+                
+                plugin.getLogger().info(plugin.getMessagesManager().getLogMessage("admin-give",
+                    "%admin%", adminName,
+                    "%player%", playerName,
+                    "%amount%", String.valueOf(amount),
+                    "%type%", luckyBlockType));
+            } catch (IOException e) {
+                plugin.getLogger().severe("Could not save to data.yml: " + e.getMessage());
+            }
+        });
+    }
+    
+    private String getCurrentTimestamp() {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        return format.format(new Date());
+    }
+    
+    public void shutdown() {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+        }
+    }
+}

@@ -1,0 +1,219 @@
+package com.akiisx.luckyblock.animation;
+
+import com.akiisx.luckyblock.LuckyBlock;
+import com.akiisx.luckyblock.data.AnimationConfig;
+import com.akiisx.luckyblock.data.ParticleConfig;
+import com.akiisx.luckyblock.data.SoundConfig;
+import com.cryptomorin.xseries.particles.XParticle;
+import com.cryptomorin.xseries.XPotion;
+import com.cryptomorin.xseries.XSound;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+
+public class AnimationManager {
+    private final LuckyBlock plugin;
+    private final Set<UUID> animatingPlayers;
+    
+    public AnimationManager(LuckyBlock plugin) {
+        this.plugin = plugin;
+        this.animatingPlayers = new HashSet<>();
+    }
+    
+    public void playAnimation(Player player, Location location, Runnable callback) {
+        AnimationConfig config = plugin.getConfigManager().getAnimationConfig();
+        
+        if (config == null || !config.isEnabled()) {
+            SoundConfig breakSound = plugin.getConfigManager().getSoundConfig();
+            if (breakSound != null && breakSound.isEnabled()) {
+                playSound(player, location, breakSound);
+            }
+            callback.run();
+            return;
+        }
+        
+        animatingPlayers.add(player.getUniqueId());
+        
+        if (config.isFreezePlayer()) {
+            XPotion.matchXPotion("SLOWNESS").map(xp -> xp.buildPotionEffect(config.getDurationTicks(), 255)).ifPresent(player::addPotionEffect);
+            XPotion.matchXPotion("JUMP_BOOST").map(xp -> xp.buildPotionEffect(config.getDurationTicks(), 128)).ifPresent(player::addPotionEffect);
+        }
+        
+        int duration = config.getDurationTicks();
+        int phase1End = duration / 3;
+        int phase2End = (duration * 2) / 3;
+        
+        final int[] tickCounter = {0};
+        
+        int taskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(plugin, () -> {
+            tickCounter[0]++;
+            
+            if (tickCounter[0] <= phase1End) {
+                playPhase1(location, tickCounter[0], phase1End);
+            } else if (tickCounter[0] <= phase2End) {
+                playPhase2(location, tickCounter[0] - phase1End, phase2End - phase1End);
+            } else {
+                playPhase3(location, tickCounter[0] - phase2End, duration - phase2End);
+            }
+        }, 0L, 1L);
+        
+        if (config.getSounds() != null && config.getSounds().isEnabled()) {
+            playSound(player, location, config.getSounds());
+            
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                XSound.matchXSound("BLOCK_NOTE_BLOCK_PLING").ifPresent(sound -> {
+                    player.playSound(location, sound.parseSound(), 1.0f, 1.5f);
+                });
+            }, phase1End);
+            
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                XSound.matchXSound("BLOCK_NOTE_BLOCK_PLING").ifPresent(sound -> {
+                    player.playSound(location, sound.parseSound(), 1.0f, 2.0f);
+                });
+            }, phase2End);
+        }
+        
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Bukkit.getScheduler().cancelTask(taskId);
+            animatingPlayers.remove(player.getUniqueId());
+            playFinalExplosion(location);
+            callback.run();
+        }, duration);
+    }
+    
+    private void playPhase1(Location loc, int tick, int maxTicks) {
+        if (loc.getWorld() == null) return;
+        
+        double progress = (double) tick / maxTicks;
+        double height = progress * 2.0;
+        double radius = 0.5 + (progress * 0.5);
+        
+        for (int i = 0; i < 3; i++) {
+            double angle = (tick * 0.3) + (i * (Math.PI * 2 / 3));
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
+            
+            Location particleLoc = loc.clone().add(0.5 + x, height, 0.5 + z);
+            
+            XParticle.of("FLAME").ifPresent(p -> 
+                loc.getWorld().spawnParticle(p.get(), particleLoc, 1, 0, 0, 0, 0)
+            );
+        }
+        
+        if (tick % 3 == 0) {
+            XParticle.of("LAVA").ifPresent(p -> 
+                loc.getWorld().spawnParticle(p.get(), loc.clone().add(0.5, 0.1, 0.5), 2, 0.3, 0.1, 0.3, 0)
+            );
+        }
+    }
+    
+    private void playPhase2(Location loc, int tick, int maxTicks) {
+        if (loc.getWorld() == null) return;
+        
+        double progress = (double) tick / maxTicks;
+        double radius = 1.0 + (progress * 0.5);
+        
+        int particles = 8;
+        for (int i = 0; i < particles; i++) {
+            double angle = (Math.PI * 2 * i / particles) + (tick * 0.2);
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
+            
+            Location particleLoc = loc.clone().add(0.5 + x, 1.0, 0.5 + z);
+            
+            XParticle.of("SPELL_WITCH").ifPresent(p -> 
+                loc.getWorld().spawnParticle(p.get(), particleLoc, 1, 0, 0, 0, 0)
+            );
+        }
+        
+        if (tick % 2 == 0) {
+            double spiralAngle = tick * 0.5;
+            double spiralRadius = 0.8;
+            double spiralHeight = 0.5 + (tick % 20) * 0.1;
+            
+            double spiralX = Math.cos(spiralAngle) * spiralRadius;
+            double spiralZ = Math.sin(spiralAngle) * spiralRadius;
+            
+            Location spiralLoc = loc.clone().add(0.5 + spiralX, spiralHeight, 0.5 + spiralZ);
+            
+            XParticle.of("REDSTONE").ifPresent(p -> 
+                loc.getWorld().spawnParticle(p.get(), spiralLoc, 1, 0, 0, 0, 0)
+            );
+        }
+    }
+    
+    private void playPhase3(Location loc, int tick, int maxTicks) {
+        if (loc.getWorld() == null) return;
+        
+        double progress = (double) tick / maxTicks;
+        
+        int rings = 3;
+        for (int ring = 0; ring < rings; ring++) {
+            double ringHeight = 0.5 + (ring * 0.5);
+            double ringRadius = 1.5 - (ring * 0.3);
+            
+            int particlesInRing = 12;
+            for (int i = 0; i < particlesInRing; i++) {
+                double angle = (Math.PI * 2 * i / particlesInRing) + (tick * 0.4) + (ring * 0.5);
+                double x = Math.cos(angle) * ringRadius;
+                double z = Math.sin(angle) * ringRadius;
+                
+                Location particleLoc = loc.clone().add(0.5 + x, ringHeight, 0.5 + z);
+                
+                if (ring == 0) {
+                    XParticle.of("FLAME").ifPresent(p -> 
+                        loc.getWorld().spawnParticle(p.get(), particleLoc, 1, 0, 0, 0, 0)
+                    );
+                } else if (ring == 1) {
+                    XParticle.of("ENCHANT").ifPresent(p -> 
+                        loc.getWorld().spawnParticle(p.get(), particleLoc, 1, 0, 0, 0, 0)
+                    );
+                } else {
+                    XParticle.of("CRIT_MAGIC").ifPresent(p -> 
+                        loc.getWorld().spawnParticle(p.get(), particleLoc, 1, 0, 0, 0, 0)
+                    );
+                }
+            }
+        }
+        
+        if (tick % 2 == 0) {
+            XParticle.of("END_ROD").ifPresent(p -> 
+                loc.getWorld().spawnParticle(p.get(), loc.clone().add(0.5, 1.5, 0.5), 3, 0.2, 0.2, 0.2, 0.05)
+            );
+        }
+    }
+    
+    private void playFinalExplosion(Location loc) {
+        if (loc.getWorld() == null) return;
+        
+        XParticle.of("EXPLOSION").ifPresent(p -> 
+            loc.getWorld().spawnParticle(p.get(), loc.clone().add(0.5, 1.0, 0.5), 1, 0, 0, 0, 0)
+        );
+        
+        XParticle.of("FIREWORK").ifPresent(p -> 
+            loc.getWorld().spawnParticle(p.get(), loc.clone().add(0.5, 1.0, 0.5), 50, 0.5, 0.5, 0.5, 0.1)
+        );
+        
+        XParticle.of("ENCHANT").ifPresent(p -> 
+            loc.getWorld().spawnParticle(p.get(), loc.clone().add(0.5, 1.0, 0.5), 30, 0.8, 0.8, 0.8, 0.2)
+        );
+        
+        XSound.matchXSound("ENTITY_FIREWORK_ROCKET_BLAST").ifPresent(sound -> {
+            loc.getWorld().playSound(loc, sound.parseSound(), 1.0f, 1.0f);
+        });
+    }
+    
+    private void playSound(Player player, Location location, SoundConfig config) {
+        XSound.matchXSound(config.getSound()).ifPresent(sound -> {
+            player.playSound(location, sound.parseSound(), config.getVolume(), config.getPitch());
+        });
+    }
+    
+    public boolean isAnimating(UUID playerId) {
+        return animatingPlayers.contains(playerId);
+    }
+}

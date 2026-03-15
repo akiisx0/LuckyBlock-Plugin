@@ -1,0 +1,60 @@
+package com.akiisx.luckyblock;
+
+import com.akiisx.luckyblock.animation.AnimationManager;
+import com.akiisx.luckyblock.command.LuckyBlockCommand;
+import com.akiisx.luckyblock.config.ConfigManager;
+import com.akiisx.luckyblock.config.LuckyBlockManager;
+import com.akiisx.luckyblock.config.MessagesManager;
+import com.akiisx.luckyblock.listener.BlockBreakListener;
+import com.akiisx.luckyblock.logging.DataLogger;
+import lombok.Getter;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.java.JavaPlugin;
+
+@Getter
+public class LuckyBlock extends JavaPlugin {
+    private ConfigManager configManager;
+    private MessagesManager messagesManager;
+    private LuckyBlockManager luckyBlockManager;
+    private AnimationManager animationManager;
+    private DataLogger dataLogger;
+
+    @Override
+    public void onEnable() {
+        this.configManager = new ConfigManager(this);
+        this.messagesManager = new MessagesManager(this);
+        this.luckyBlockManager = new LuckyBlockManager(this);
+        this.animationManager = new AnimationManager(this);
+        this.dataLogger = new DataLogger(this);
+
+        Bukkit.getPluginManager().registerEvents(new BlockBreakListener(this), this);
+
+        LuckyBlockCommand command = new LuckyBlockCommand(this);
+        getCommand("luckyblock").setExecutor(command);
+        getCommand("luckyblock").setTabCompleter(command);
+
+        sendStartupMessage();
+    }
+
+    @Override
+    public void onDisable() {
+        if (this.dataLogger != null) {
+            this.dataLogger.shutdown();
+        }
+    }
+
+    private void sendStartupMessage() {
+        Bukkit.getConsoleSender().sendMessage("§a========================================");
+        Bukkit.getConsoleSender().sendMessage("§e  LuckyBlock");
+        Bukkit.getConsoleSender().sendMessage("§7  Version: §f1.16.x-1.21.11");
+        Bukkit.getConsoleSender().sendMessage("§7  Author: §fakiisx");
+        Bukkit.getConsoleSender().sendMessage("§7  Support: §fhttps://discord.gg/AgmZHqZyHp");
+        Bukkit.getConsoleSender().sendMessage("§a========================================");
+    }
+
+    public void reload() {
+        this.configManager.reload();
+        this.messagesManager.reload();
+        this.luckyBlockManager.reload();
+    }
+}
